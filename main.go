@@ -210,7 +210,13 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 		}
 
 		if tfi, err := os.Stat(to); err == nil {
-			if tfi.Size() == fi.Size() && tfi.ModTime().After(fi.ModTime()) || tfi.ModTime().Equal(fi.ModTime()) {
+			// We're expending a regular file and ergo if the dest is not a regular file, remove it.
+			if !tfi.Mode().IsRegular() {
+				err = os.RemoveAll(to)
+				if err != nil {
+					return err
+				}
+			} else if tfi.Size() == fi.Size() && tfi.ModTime().After(fi.ModTime()) || tfi.ModTime().Equal(fi.ModTime()) {
 				return nil
 			}
 		}
