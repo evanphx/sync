@@ -12,6 +12,7 @@ import (
 
 	ignore "github.com/codeskyblue/dockerignore"
 	"github.com/fsnotify/fsnotify"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -134,7 +135,7 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 
 		rel, err := filepath.Rel(*fSrc, path)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "calculating rel path")
 		}
 
 		if match, err := ignore.Matches(rel, ignorePatterns); err == nil && match {
@@ -159,29 +160,49 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 			}
 
 			w.Add(path)
-			_, err = os.Stat(to)
+			ft, err := os.Stat(to)
 			if err != nil {
 				if os.IsNotExist(err) {
-					return os.Mkdir(to, fi.Mode())
+					err = os.Mkdir(to, fi.Mode())
+					if err != nil {
+						return errors.Wrapf(err, "making a directory")
+					}
+
+					return nil
 				}
-				return err
+				return errors.Wrapf(err, "error stating")
 			}
 
-			return os.Chmod(to, fi.Mode())
+			if !ft.IsDir() {
+				err = os.Remove(to)
+				if err != nil {
+					return errors.Wrapf(err, "removing errant non-dir")
+				}
+
+				err = os.Mkdir(to, fi.Mode())
+				if err != nil {
+					return errors.Wrapf(err, "making a directory")
+				}
+			} else {
+				err = os.Chmod(to, fi.Mode())
+				if err != nil {
+					return errors.Wrapf(err, "chmod")
+				}
+			}
 		}
 
 		if !fi.Mode().IsRegular() {
 			if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
 				lnk, err := os.Readlink(path)
 				if err != nil {
-					return err
+					return errors.Wrapf(err, "reading link from %s", path)
 				}
 
 				os.Remove(to)
 
 				err = os.Symlink(lnk, to)
 				if err != nil {
-					return err
+					return errors.Wrapf(err, "symlinking")
 				}
 			}
 
@@ -195,7 +216,12 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 		}
 
 		total += fi.Size()
-		return copyFile(rel, false)
+		err = copyFile(rel, false)
+		if err != nil {
+			return errors.Wrapf(err, "copying file")
+		}
+
+		return nil
 	})
 
 	if err != nil {
@@ -237,7 +263,7 @@ func copyFile(rel string, stat bool) error {
 
 	tf, err := os.OpenFile(to, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fi.Mode())
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "opening file for writing")
 	}
 
 	if stat {
