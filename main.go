@@ -176,7 +176,7 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 			}
 
 			w.Add(path)
-			ft, err := os.Stat(to)
+			ft, err := os.Lstat(to)
 			if err != nil {
 				if os.IsNotExist(err) {
 					err = os.Mkdir(to, fi.Mode())
@@ -217,7 +217,7 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 			return nil
 		}
 
-		if tfi, err := os.Stat(to); err == nil {
+		if tfi, err := os.Lstat(to); err == nil {
 			// We're expending a regular file and ergo if the dest is not a regular file, remove it.
 			if !tfi.Mode().IsRegular() {
 				err = os.RemoveAll(to)
@@ -390,7 +390,7 @@ func chmodFile(rel string) error {
 		to   = filepath.Join(*fDest, rel)
 	)
 
-	fi, err := os.Stat(from)
+	fi, err := os.Lstat(from)
 	if err != nil {
 		return err
 	}
