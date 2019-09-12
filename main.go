@@ -96,7 +96,7 @@ func run() error {
 			}
 
 			if ev.Op&fsnotify.Write == fsnotify.Write {
-				if err = copyFile(rel, true, 0); err != nil {
+				if err = copyFile(rel, true); err != nil {
 					return err
 				}
 			}
@@ -230,7 +230,7 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 		}
 
 		total += fi.Size()
-		err = copyFile(rel, false, os.O_CREATE)
+		err = copyFile(rel, false)
 		if err != nil {
 			return errors.Wrapf(err, "copying file")
 		}
@@ -301,7 +301,7 @@ func createEntry(rel string, w *fsnotify.Watcher) error {
 	return f.Close()
 }
 
-func copyFile(rel string, stat bool, flag int) error {
+func copyFile(rel string, stat bool) error {
 	var (
 		from = filepath.Join(*fSrc, rel)
 		to   = filepath.Join(*fDest, rel)
@@ -337,7 +337,7 @@ func copyFile(rel string, stat bool, flag int) error {
 		return nil
 	}
 
-	tf, err := os.OpenFile(to, os.O_TRUNC|os.O_WRONLY|flag, fi.Mode())
+	tf, err := os.OpenFile(to, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fi.Mode())
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Printf("Unable to copy to %s, doesn't exist", rel)
