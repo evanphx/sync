@@ -90,7 +90,7 @@ func run() error {
 			}
 
 			if ev.Op&fsnotify.Create == fsnotify.Create {
-				if err = createFile(rel); err != nil {
+				if err = createEntry(rel, w); err != nil {
 					return err
 				}
 			}
@@ -102,7 +102,7 @@ func run() error {
 			}
 
 			if ev.Op&fsnotify.Remove == fsnotify.Remove {
-				if err = removeFile(rel); err != nil {
+				if err = removeEntry(rel, w); err != nil {
 					return err
 				}
 			}
@@ -114,6 +114,22 @@ func run() error {
 			}
 		}
 	}
+}
+
+func setupLink(to, from string) error {
+	lnk, err := os.Readlink(from)
+	if err != nil {
+		return errors.Wrapf(err, "reading link from %s", from)
+	}
+
+	os.Remove(to)
+
+	err = os.Symlink(lnk, to)
+	if err != nil {
+		return errors.Wrapf(err, "symlinking")
+	}
+
+	return nil
 }
 
 func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
@@ -193,17 +209,7 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 
 		if !fi.Mode().IsRegular() {
 			if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
-				lnk, err := os.Readlink(path)
-				if err != nil {
-					return errors.Wrapf(err, "reading link from %s", path)
-				}
-
-				os.Remove(to)
-
-				err = os.Symlink(lnk, to)
-				if err != nil {
-					return errors.Wrapf(err, "symlinking")
-				}
+				return setupLink(to, path)
 			}
 
 			return nil
@@ -239,16 +245,58 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 	return nil
 }
 
-func createFile(rel string) error {
-	to := filepath.Join(*fDest, rel)
+func createEntry(rel string, w *fsnotify.Watcher) error {
+	var (
+		from = filepath.Join(*fSrc, rel)
+		to   = filepath.Join(*fDest, rel)
+	)
 
-	fi, err := os.Create(to)
+	fi, err := os.Lstat(from)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("Created %s", rel)
-	return fi.Close()
+	if fi.IsDir() {
+		log.Printf("Created directory %s", rel)
+
+		err := os.Mkdir(to, fi.Mode())
+		if err != nil {
+			return err
+		}
+
+		w.Add(from)
+
+		return nil
+	}
+
+	if !fi.Mode().IsRegular() {
+		if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
+			return setupLink(to, from)
+		}
+
+		// skip non-regular files entirely
+		return nil
+	}
+
+	if tfi, err := os.Lstat(to); err == nil {
+		// We're expending a regular file and ergo if the dest is not a regular file, remove it.
+		if !tfi.Mode().IsRegular() {
+			err = os.RemoveAll(to)
+			if err != nil {
+				return err
+			}
+		} else if tfi.Size() == fi.Size() && tfi.ModTime().After(fi.ModTime()) || tfi.ModTime().Equal(fi.ModTime()) {
+			return nil
+		}
+	}
+
+	f, err := os.OpenFile(to, os.O_CREATE, fi.Mode())
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Created file %s", rel)
+	return f.Close()
 }
 
 func copyFile(rel string, stat bool, flag int) error {
@@ -321,9 +369,16 @@ func copyFile(rel string, stat bool, flag int) error {
 	return nil
 }
 
-func removeFile(rel string) error {
+func removeEntry(rel string, w *fsnotify.Watcher) error {
+	var (
+		from = filepath.Join(*fSrc, rel)
+		to   = filepath.Join(*fDest, rel)
+	)
+
+	w.Remove(from)
+
 	log.Printf("Remove %s", rel)
-	os.Remove(filepath.Join(*fDest, rel))
+	os.Remove(to)
 	return nil
 }
 
