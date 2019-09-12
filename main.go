@@ -205,6 +205,8 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 					return errors.Wrapf(err, "chmod")
 				}
 			}
+
+			return nil
 		}
 
 		if !fi.Mode().IsRegular() {
