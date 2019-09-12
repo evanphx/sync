@@ -96,7 +96,7 @@ func run() error {
 			}
 
 			if ev.Op&fsnotify.Write == fsnotify.Write {
-				if err = copyFile(rel, true); err != nil {
+				if err = copyFile(rel, true, 0); err != nil {
 					return err
 				}
 			}
@@ -222,7 +222,7 @@ func syncDirs(w *fsnotify.Watcher, cancel chan os.Signal) error {
 		}
 
 		total += fi.Size()
-		err = copyFile(rel, false)
+		err = copyFile(rel, false, os.O_CREATE)
 		if err != nil {
 			return errors.Wrapf(err, "copying file")
 		}
@@ -251,7 +251,7 @@ func createFile(rel string) error {
 	return fi.Close()
 }
 
-func copyFile(rel string, stat bool) error {
+func copyFile(rel string, stat bool, flag int) error {
 	var (
 		from = filepath.Join(*fSrc, rel)
 		to   = filepath.Join(*fDest, rel)
@@ -267,9 +267,40 @@ func copyFile(rel string, stat bool) error {
 		return err
 	}
 
-	tf, err := os.OpenFile(to, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fi.Mode())
+	switch fi.Mode() & os.ModeType {
+	case os.ModeDevice, os.ModeCharDevice:
+		log.Printf("Cowardly refusing to copy devices")
+		return nil
+	case os.ModeNamedPipe:
+		log.Printf("Cowardly refusing to copy named pipe")
+		return nil
+	case os.ModeSocket:
+		log.Printf("Cowardly refusing to copy socket")
+		return nil
+	case os.ModeDir:
+		log.Printf("Cowardly refusing to copy directory")
+		return nil
+	case os.ModeSymlink, 0:
+		// symlink or regular, that's fine
+	default:
+		log.Printf("Cowardly refusing to copy unknown file type: %d", fi.Mode()&os.ModeType)
+		return nil
+	}
+
+	tf, err := os.OpenFile(to, os.O_TRUNC|os.O_WRONLY|flag, fi.Mode())
 	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("Unable to copy to %s, doesn't exist", rel)
+			return nil
+		}
+
 		return errors.Wrapf(err, "opening file for writing")
+	}
+
+	// Skip where the from is size 0, ie a lock file
+	if fi.Size() == 0 {
+		log.Printf("File %s is 0 bytes, truncating", rel)
+		return tf.Close()
 	}
 
 	if stat {
